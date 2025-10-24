@@ -1,8 +1,9 @@
+import math
 import os
 import sys
 import time
 import random
-from enum import Enum
+from enum import Enum, auto
 from typing import Optional
 import pygame
 from pathlib import Path
@@ -18,14 +19,15 @@ TRANSITION_DURATION = 2.0  # Duration of transition effect (seconds)
 ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
 
 class FillType(Enum):
-    BLACK = 1
-    WHITE = 2
-    TOP_PIXEL = 3
-    SIDE_PIXEL = 4
+    BLACK = auto()
+    WHITE = auto()
+    TOP_PIXEL = auto()
+    SIDE_PIXEL = auto()
+    CLOSEST_BW = auto()
 
 class SlideshowMode(Enum):
-    SEQUENTIAL = 1
-    RANDOM = 2
+    SEQUENTIAL = auto()
+    RANDOM = auto()
 
 class PhotoFrame:
     def __init__(self):
@@ -53,7 +55,7 @@ class PhotoFrame:
         self.transition_start_time = 0
         self.is_transitioning = False
         self.paused = False
-        self.fill_type = FillType.SIDE_PIXEL
+        self.fill_type = FillType.CLOSEST_BW
         self.slideshow_mode = SlideshowMode.RANDOM
         self.history = deque(maxlen=100)
         # Load images from the directory
@@ -114,6 +116,7 @@ class PhotoFrame:
             # Scale image
             scaled_img = pygame.transform.smoothscale(img, (new_width, new_height))
 
+            # Calculate position to center the image
             pos_x = (self.screen_width - new_width) // 2
             pos_y = (self.screen_height - new_height) // 2
 
@@ -133,16 +136,22 @@ class PhotoFrame:
                 r_avg = sum(pixel[0] for pixel in left_pixels) // len(left_pixels)
                 b_avg = sum(pixel[1] for pixel in left_pixels) // len(left_pixels)
                 g_avg = sum(pixel[2] for pixel in left_pixels) // len(left_pixels)
-                a_avg = sum(pixel[3] for pixel in left_pixels) // len(left_pixels)
-                fade_to_color = (r_avg, b_avg, g_avg, a_avg)
+                fade_to_color = (r_avg, b_avg, g_avg, 255)
                 for i in range(scaled_img.get_height()):
                     low_line = scaled_img.get_at((0, i))
-                    high_line = scaled_img.get_at((scaled_img.get_width() - 1, i))
                     full_surface.fill(low_line, (0, i, self.screen_width//2, 1))
-                    full_surface.fill(high_line, (self.screen_width//2, i, self.screen_width//2, 1))
-
-            # Calculate position to center the image
-
+                    high_line = scaled_img.get_at((scaled_img.get_width() - 1, i))
+                    full_surface.fill(
+                        high_line,
+                        (self.screen_width // 2, i, self.screen_width // 2, 1),
+                    )
+            elif self.fill_type == FillType.CLOSEST_BW:
+                pixel = scaled_img.get_at((0, 0))
+                avg = pixel[0] + pixel[1] + pixel[2] / 3
+                if avg < 128:
+                    full_surface.fill((0, 0, 0))
+                else:
+                    full_surface.fill((255, 255, 255))
 
             # Blit the scaled image onto the center of the black surface
             full_surface.blit(scaled_img, (pos_x, pos_y))
