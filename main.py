@@ -45,6 +45,8 @@ class PhotoFrame:
         self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         pygame.display.set_caption("Photo Frame")
 
+        self.font = pygame.font.Font(None, 36)
+
         # Initialize variables
         self.running = True
         self.images = []
@@ -87,10 +89,10 @@ class PhotoFrame:
         except Exception as e:
             print(f"Error loading images: {e}")
 
-    def load_current_image(self, idx: Optional[int] = None):
+    def load_current_image(self, idx: Optional[int] = None) -> pygame.Surface:
         """Load and scale the current image"""
         if not self.images:
-            return
+            raise ValueError("No images found")
 
         try:
             image_path = self.images[idx or self.current_image_index]
@@ -161,22 +163,21 @@ class PhotoFrame:
         except Exception as e:
             print(f"Error loading image {image_path}: {e}")
             # Create a blank image with error message
-            self.current_image = pygame.Surface((self.screen_width, self.screen_height))
-            self.current_image.fill((0, 0, 0))
-            if pygame.font.get_init():
-                font = pygame.font.Font(None, 36)
-                text = font.render(
-                    f"Error loading image: {os.path.basename(image_path)}",
-                    True,
-                    (255, 0, 0),
-                )
-                self.current_image.blit(
-                    text,
-                    (
-                        self.screen_width // 2 - text.get_width() // 2,
-                        self.screen_height // 2 - text.get_height() // 2,
-                    ),
-                )
+            error_image = pygame.Surface((self.screen_width, self.screen_height))
+            error_image.fill((0, 0, 0))
+            text = self.font.render(
+                f"Error loading image: {os.path.basename(image_path)}",
+                True,
+                (255, 0, 0),
+            )
+            error_image.blit(
+                text,
+                (
+                    self.screen_width // 2 - text.get_width() // 2,
+                    self.screen_height // 2 - text.get_height() // 2,
+                ),
+            )
+            return error_image
 
     def start_transition_to(self, index):
         """Start transition to a new image"""
@@ -310,6 +311,14 @@ class PhotoFrame:
         else:
             # Just draw the current image
             self.screen.blit(self.current_image, (0, 0))
+            if self.paused:
+                text = self.font.render(
+                    f"=",
+                    True,
+                    (255, 0, 0),
+                )
+                text = pygame.transform.rotate(text, 90)
+                self.screen.blit(text, (10, 10))
 
         pygame.display.flip()
 
