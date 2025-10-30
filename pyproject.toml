@@ -5,4 +5,6 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "pygame>=2.6.1",
+    "pgzero>=1.2.1",
+    "pydantic-settings>=2.11.0"
 ]

@@ -1,36 +1,51 @@
-import math
 import os
-import sys
-import time
 import random
-from enum import Enum, auto
-from typing import Optional
-import pygame
-from pathlib import Path
+import time
 from collections import deque
+from enum import Enum
+from pathlib import Path
+from typing import Optional, Annotated
 
+import pygame
+from pgzero.ptext import getsurf as pgz_text
+from pydantic import Field, BeforeValidator
+from pydantic_settings import BaseSettings, SettingsConfigDict, CliApp
 
 # Configuration
-IMAGE_DIRECTORY = (
-    "/home/ajurna/Pictures"  # Directory containing your images
-)
-SLIDESHOW_DELAY = 10  # Time between automatic image changes (seconds)
-TRANSITION_DURATION = 2.0  # Duration of transition effect (seconds)
 ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
 
 class FillType(Enum):
-    BLACK = auto()
-    WHITE = auto()
-    TOP_PIXEL = auto()
-    SIDE_PIXEL = auto()
-    CLOSEST_BW = auto()
+    BLACK = "BLACK"
+    WHITE = "WHITE"
+    TOP_PIXEL = "TOP_PIXEL"
+    SIDE_PIXEL = "SIDE_PIXEL"
+    CLOSEST_BW = "CLOSEST_BW"
 
 class SlideshowMode(Enum):
-    SEQUENTIAL = auto()
-    RANDOM = auto()
+    SEQUENTIAL = "SEQUENTIAL"
+    RANDOM = "RANDOM"
+
+class Validators:
+    @staticmethod
+    def validate_image_directory(v):
+        if not os.path.isdir(v):
+            raise ValueError("Image directory does not exist")
+    @staticmethod
+    def to_upper(v):
+        return v.upper()
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', env_prefix="PYFRAME_")
+    image_directory: Annotated[str, BeforeValidator(Validators.validate_image_directory)] = Field("/path/to/Pictures")
+    fill_type: Annotated[FillType, BeforeValidator(Validators.to_upper)] = Field(FillType.CLOSEST_BW)
+    slideshow_mode: Annotated[SlideshowMode, BeforeValidator(Validators.to_upper)] = Field(SlideshowMode.RANDOM)
+    transition_duration: Annotated[float, BeforeValidator(float)] = Field(2)
+    slideshow_delay: Annotated[float, BeforeValidator(float)] = Field(10)
+
 
 class PhotoFrame:
-    def __init__(self):
+    def __init__(self, settings: Optional[Settings] = None):
         # Initialize pygame
         pygame.init()
         pygame.mouse.set_visible(False)  # Hide the mouse cursor
@@ -48,17 +63,18 @@ class PhotoFrame:
         self.font = pygame.font.Font(None, 36)
 
         # Initialize variables
+        self.settings = settings
+
         self.running = True
         self.images = []
         self.current_image_index = 0
+        self.next_image_index = 0
         self.current_image: Optional[pygame.Surface] = None
         self.next_image_surface: Optional[pygame.Surface] = None
         self.last_change_time = time.time()
         self.transition_start_time = 0
         self.is_transitioning = False
         self.paused = False
-        self.fill_type = FillType.CLOSEST_BW
-        self.slideshow_mode = SlideshowMode.RANDOM
         self.history = deque(maxlen=100)
         # Load images from the directory
         self.load_images()
@@ -71,9 +87,9 @@ class PhotoFrame:
     def load_images(self):
         """Find all image files in the specified directory"""
         try:
-            image_dir = Path(IMAGE_DIRECTORY)
+            image_dir = Path(self.settings.image_directory)
             if not image_dir.exists():
-                print(f"Error: Directory {IMAGE_DIRECTORY} not found.")
+                print(f"Error: Directory {self.settings.image_directory} not found.")
                 return
 
             # Get all files with allowed extensions
@@ -82,8 +98,7 @@ class PhotoFrame:
                 for f in image_dir.rglob("*")
                 if f.is_file() and f.suffix.lower() in ALLOWED_EXTENSIONS
             ]
-
-            print(f"Found {len(self.images)} images in {IMAGE_DIRECTORY}")
+            print(f"Found {len(self.images)} images in {self.settings.image_directory}:")
             if len(self.images) == 0:
                 print("No images found! Please check the directory and file types.")
         except Exception as e:
@@ -99,7 +114,7 @@ class PhotoFrame:
 
             print(f"Loading image: {image_path}")
 
-            # Load image and get its dimensions
+            # Load the image and get its dimensions
             img = pygame.image.load(image_path)
             img_width, img_height = img.get_size()
 
@@ -107,7 +122,7 @@ class PhotoFrame:
             img_aspect = img_width / img_height
             screen_aspect = self.screen_width / self.screen_height
 
-            # Scale image to fit screen while maintaining aspect ratio
+            # Scale the image to fit the screen while maintaining the aspect ratio
             if img_aspect > screen_aspect:  # Image is wider
                 new_width = self.screen_width
                 new_height = int(new_width / img_aspect)
@@ -122,23 +137,16 @@ class PhotoFrame:
             pos_x = (self.screen_width - new_width) // 2
             pos_y = (self.screen_height - new_height) // 2
 
-            # Create surface for the full screen with black background
+            # Create the surface for the full screen with a black background
             full_surface = pygame.Surface((self.screen_width, self.screen_height))
 
-            if self.fill_type == FillType.BLACK:
+            if self.settings.fill_type == FillType.BLACK:
                 full_surface.fill((0, 0, 0))
-            elif self.fill_type == FillType.WHITE:
+            elif self.settings.fill_type == FillType.WHITE:
                 full_surface.fill((255, 255, 255))
-            elif self.fill_type == FillType.TOP_PIXEL:
+            elif self.settings.fill_type == FillType.TOP_PIXEL:
                 full_surface.fill(scaled_img.get_at((0, 0)))
-            elif self.fill_type == FillType.SIDE_PIXEL:
-                left_pixels = [
-                    scaled_img.get_at((0, y)) for y in range(scaled_img.get_height())
-                ]
-                r_avg = sum(pixel[0] for pixel in left_pixels) // len(left_pixels)
-                b_avg = sum(pixel[1] for pixel in left_pixels) // len(left_pixels)
-                g_avg = sum(pixel[2] for pixel in left_pixels) // len(left_pixels)
-                fade_to_color = (r_avg, b_avg, g_avg, 255)
+            elif self.settings.fill_type == FillType.SIDE_PIXEL:
                 for i in range(scaled_img.get_height()):
                     low_line = scaled_img.get_at((0, i))
                     full_surface.fill(low_line, (0, i, self.screen_width//2, 1))
@@ -147,7 +155,7 @@ class PhotoFrame:
                         high_line,
                         (self.screen_width // 2, i, self.screen_width // 2, 1),
                     )
-            elif self.fill_type == FillType.CLOSEST_BW:
+            elif self.settings.fill_type == FillType.CLOSEST_BW:
                 pixel = scaled_img.get_at((0, 0))
                 avg = pixel[0] + pixel[1] + pixel[2] / 3
                 if avg < 128:
@@ -159,14 +167,18 @@ class PhotoFrame:
             full_surface.blit(scaled_img, (pos_x, pos_y))
 
             return full_surface
+        except IndexError:
+            print(f"Image index {idx or self.current_image_index} out of range. Resetting to 0.")
+            self.current_image_index = 0
+            return self.load_current_image()
 
         except Exception as e:
-            print(f"Error loading image {image_path}: {e}")
-            # Create a blank image with error message
+            print(f"Error loading image index {idx or self.current_image_index}: {self.images[idx or self.current_image_index]}: {e}")
+            # Create a blank image with an error message
             error_image = pygame.Surface((self.screen_width, self.screen_height))
             error_image.fill((0, 0, 0))
             text = self.font.render(
-                f"Error loading image: {os.path.basename(image_path)}",
+                f"Error loading image: {os.path.basename(self.images[idx or self.current_image_index])}",
                 True,
                 (255, 0, 0),
             )
@@ -184,7 +196,7 @@ class PhotoFrame:
         if index == self.current_image_index or not self.images:
             return
 
-        # Save current image for transition
+        # Save the current image for transition
         self.next_image_index = index
 
         # Load the next image
@@ -201,7 +213,7 @@ class PhotoFrame:
 
         # Calculate transition progress (0.0 to 1.0)
         elapsed = time.time() - self.transition_start_time
-        progress = min(elapsed / TRANSITION_DURATION, 1.0)
+        progress = min(elapsed / self.settings.transition_duration, 1.0)
 
         if progress >= 1.0:
             # Transition complete
@@ -224,7 +236,7 @@ class PhotoFrame:
         self.history.append(self.current_image_index)
         if not self.images:
             return
-        if self.slideshow_mode == SlideshowMode.RANDOM:
+        if self.settings.slideshow_mode == SlideshowMode.RANDOM:
             next_index = random.randint(0, len(self.images) - 1)
         else:
             next_index = (self.current_image_index + 1) % len(self.images)
@@ -300,7 +312,7 @@ class PhotoFrame:
         if (
             not self.paused
             and not self.is_transitioning
-            and current_time - self.last_change_time > SLIDESHOW_DELAY
+            and current_time - self.last_change_time > self.settings.slideshow_delay
         ):
             self.next_image()
 
@@ -319,7 +331,8 @@ class PhotoFrame:
                 )
                 text = pygame.transform.rotate(text, 90)
                 self.screen.blit(text, (10, 10))
-
+                text = pgz_text(f"{self.images[self.current_image_index].replace(self.settings.image_directory, '')}", owidth=1, ocolor="black", color="white", fontsize=36)
+                self.screen.blit(text, (self.screen_width//2 - text.get_width()//2 , self.screen_height - text.get_height() - 10))
         pygame.display.flip()
 
     def run(self):
@@ -356,5 +369,11 @@ if __name__ == "__main__":
         os.environ['DISPLAY'] = ':0'
 
     # Create and run the photo frame
-    photo_frame = PhotoFrame()
+    try:
+        config = CliApp.run(Settings)
+    except Exception as err:
+        print(f"Error loading settings: {err}")
+        exit(1)
+    print(config.model_dump())
+    photo_frame = PhotoFrame(config)
     photo_frame.run()
