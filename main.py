@@ -34,7 +34,9 @@ class Validators:
 
     @staticmethod
     def to_upper(v):
-        return v.upper()
+        if isinstance(v, str):
+            return v.upper()
+        return v
 
 
 class Settings(BaseSettings):
