@@ -30,6 +30,8 @@ class Validators:
     def validate_image_directory(v):
         if not os.path.isdir(v):
             raise ValueError("Image directory does not exist")
+        return v
+
     @staticmethod
     def to_upper(v):
         return v.upper()
