@@ -1,0 +1,14 @@
+---
+webdav:
+  host: https://example.com
+  username: user
+  password: pass
+  target_dirs:
+    - Photos
+  workers: 5
+destination: ./temp
+filters:
+  ignore_files: []
+  ignore_files_contains: []
+  ignore_folders: []
+

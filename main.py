@@ -10,6 +10,8 @@ import pygame
 from pgzero.ptext import getsurf as pgz_text
 from pydantic import Field, BeforeValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict, CliApp
+from watchfiles import watch, Change
+
 
 # Configuration
 ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".gif"]
@@ -80,12 +82,13 @@ class PhotoFrame:
         self.is_transitioning = False
         self.paused = False
         self.history = deque(maxlen=100)
+        self.file_timeout = 0
+        self.file_watcher = watch(self.settings.image_directory, yield_on_timeout=True, rust_timeout=10)
         # Load images from the directory
         self.load_images()
 
-        # Start with a random image
+        # Load initial image
         if self.images:
-            self.current_image_index = random.randint(0, len(self.images) - 1)
             self.current_image = self.load_current_image()
 
     def load_images(self):
@@ -103,6 +106,8 @@ class PhotoFrame:
                 if f.is_file() and f.suffix.lower() in ALLOWED_EXTENSIONS
             ]
             print(f"Found {len(self.images)} images in {self.settings.image_directory}:")
+            if self.settings.slideshow_mode == SlideshowMode.RANDOM:
+                random.shuffle(self.images)
             if len(self.images) == 0:
                 print("No images found! Please check the directory and file types.")
         except Exception as e:
@@ -237,11 +242,14 @@ class PhotoFrame:
 
     def next_image(self):
         """Switch to the next image"""
-        self.history.append(self.current_image_index)
+        self.history.append(self.images[self.current_image_index])
         if not self.images:
             return
         if self.settings.slideshow_mode == SlideshowMode.RANDOM:
-            next_index = random.randint(0, len(self.images) - 1)
+            next_index = self.current_image_index + 1
+            if next_index >= len(self.images):
+                random.shuffle(self.images)
+                next_index = 0
         else:
             next_index = (self.current_image_index + 1) % len(self.images)
         self.start_transition_to(next_index)
@@ -252,7 +260,7 @@ class PhotoFrame:
         if not self.images:
             return
         if len(self.history) > 0:
-            self.start_transition_to(self.history.pop())
+            self.start_transition_to(self.images.index(self.history.pop()))
         self.last_change_time = time.time()
 
     def random_image(self):
@@ -307,6 +315,23 @@ class PhotoFrame:
                         self.next_image()
                     else:
                         self.toggle_pause()
+        self.file_timeout -= 1
+        if self.file_timeout < 0:
+            self.file_timeout = 300
+            while changes:=next(self.file_watcher):
+                for action, file_path  in changes:
+                    match action:
+                        case Change.added:
+                            tmp_path = Path(file_path)
+                            if tmp_path.is_file():
+                                if tmp_path.suffix in ALLOWED_EXTENSIONS:
+                                    self.images.append(file_path)
+                                    print(f"Image added: {tmp_path}")
+                        case Change.deleted:
+                            self.images.remove(file_path)
+                            print(f"Image removed: {file_path}")
+                        case _:
+                            pass
 
     def update(self):
         """Update the display based on time and transitions"""
